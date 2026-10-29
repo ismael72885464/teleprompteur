@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>Téléprompteur Radar</title>
+<style>
+:root{
+  --fs:38px; --ph:45; --red:#e5322d; --red2:#ff4d47;
+  --glass:rgba(255,255,255,.13); --line:rgba(255,255,255,.2);
+  --st:env(safe-area-inset-top,0px); --sb:env(safe-area-inset-bottom,0px);
+  --sl:env(safe-area-inset-left,0px); --sr:env(safe-area-inset-right,0px); --tt:calc(var(--st) + 54px); --tx:18px;
+  --ui:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;overscroll-behavior:none;font-family:var(--ui)}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;touch-action:manipulation}
+button:disabled{opacity:.35;cursor:default}
+:focus{outline:none}
+:focus-visible{outline:3px solid #ffd54a;outline-offset:2px}
+[hidden]{display:none!important}
+
+#app{position:fixed;inset:0;height:100vh;height:100dvh;display:grid;grid-template-rows:calc(var(--ph)*1dvh + var(--st)) minmax(0,1fr) auto;overflow:hidden}
+#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;z-index:0}
+#cam.mirror{transform:scaleX(-1)}
+
+/* Zone du texte */
+#prompter{position:relative;z-index:2;background:rgba(0,0,0,.66);padding-top:var(--st);border-bottom:1px solid rgba(255,255,255,.08)}
+#scroller{position:absolute;top:var(--tt);left:0;right:0;bottom:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;overflow-anchor:none;scrollbar-width:none}
+#scroller::-webkit-scrollbar{display:none}
+#text{margin:0;padding:0 calc(var(--tx) + var(--sr)) 0 calc(var(--tx) + var(--sl));white-space:pre-wrap;overflow-wrap:anywhere;text-align:center;
+  font:800 var(--fs)/1.3 var(--ui);color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.6);letter-spacing:.005em}
+#text.mirror{transform:scaleX(-1)}
+#text:empty::before{content:"Aucun texte. Touchez « Texte » en bas pour coller votre script.";color:rgba(255,255,255,.55);font-size:22px;font-weight:600}
+#fade{position:absolute;left:0;right:0;top:var(--tt);height:var(--rl,90px);pointer-events:none;
+  background:linear-gradient(rgba(0,0,0,.6),rgba(0,0,0,.15))}
+#readline{position:absolute;left:0;right:0;top:calc(var(--tt) + var(--rl,90px) - 3px);height:2px;pointer-events:none;
+  background:linear-gradient(90deg,var(--red2) 0 22px,rgba(255,255,255,.45) 22px calc(100% - 22px),var(--red2) calc(100% - 22px))}
+#clear{position:absolute;top:calc(var(--st) + 6px);right:calc(6px + var(--sr));z-index:3;width:48px;height:48px;border:0;background:none;display:grid;place-items:center;padding:0}
+#clear span{width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,.55);border:1px solid var(--line);display:grid;place-items:center}
+#clear.armed span{background:var(--red);border-color:var(--red2)}
+#clearHint{position:absolute;top:calc(var(--st) + 13px);right:calc(60px + var(--sr));z-index:3;background:var(--red);color:#fff;font:700 14px var(--ui);padding:8px 12px;border-radius:10px;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+
+/* Zone du milieu */
+#mid{position:relative;z-index:1;min-height:0}
+#recInd{position:absolute;top:10px;left:calc(12px + var(--sl));display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.6);
+  border-radius:999px;padding:6px 14px 6px 10px;font:800 16px var(--ui);letter-spacing:.06em;font-variant-numeric:tabular-nums}
+#recInd i{width:12px;height:12px;border-radius:50%;background:var(--red2);animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:.15}}
+#camBtn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);min-height:52px;padding:0 22px;border-radius:999px;border:1px solid var(--line);
+  background:rgba(0,0,0,.6);font:700 17px var(--ui);display:flex;align-items:center;gap:10px;white-space:nowrap}
+
+/* Barre de commandes */
+#bar{position:relative;z-index:2;padding:10px calc(10px + var(--sr)) calc(10px + var(--sb)) calc(10px + var(--sl));
+  background:linear-gradient(rgba(0,0,0,.45),rgba(0,0,0,.82));display:flex;flex-direction:column;gap:8px}
+.sets{display:flex;flex-wrap:wrap;justify-content:center;gap:8px 14px}
+.grp{display:flex;align-items:center;gap:6px}
+.b{min-width:48px;min-height:48px;border-radius:14px;border:1px solid var(--line);background:var(--glass);font:700 15px var(--ui);
+  display:inline-flex;align-items:center;justify-content:center;padding:0 10px;gap:6px}
+.b:active{background:rgba(255,255,255,.26)}
+.b[aria-pressed="true"]{background:#fff;color:#000;border-color:#fff}
+.val{min-width:34px;text-align:center;font:800 16px var(--ui);font-variant-numeric:tabular-nums}
+.seg{display:flex;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--glass)}
+.seg .b{border:0;border-radius:0;background:none;padding:0 9px;font-size:14px}
+.seg .b+.b{border-left:1px solid var(--line)}
+.seg .b[aria-pressed="true"]{background:#fff;color:#000}
+input[type=range]{width:96px;height:48px;margin:0;accent-color:var(--red2);background:none}
+.main{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.1fr) auto minmax(0,.85fr) minmax(0,.85fr);align-items:center;gap:6px}
+.m{min-height:56px;border-radius:16px;border:1px solid var(--line);background:var(--glass);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font:700 12px var(--ui);padding:4px 1px;min-width:0}
+.m span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.m:active{background:rgba(255,255,255,.26)}
+#play.on{background:#fff;color:#000}
+svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+#rec{width:72px;height:72px;border-radius:50%;border:4px solid #fff;background:rgba(0,0,0,.35);display:grid;place-items:center;padding:0;margin:0}
+#rec i{display:block;width:52px;height:52px;border-radius:50%;background:var(--red);transition:all .2s}
+#rec.on i{width:30px;height:30px;border-radius:7px}
+#rec.wait i{background:#888}
+
+/* Compte à rebours */
+#count{position:fixed;inset:0;z-index:6;display:grid;place-items:center;pointer-events:none}
+#count b{font:900 min(34vmin,220px)/1 var(--ui);color:#fff;text-shadow:0 6px 30px rgba(0,0,0,.8);animation:pop .9s ease-out both}
+@keyframes pop{from{transform:scale(1.5);opacity:0}25%{opacity:1}to{transform:scale(1);opacity:.9}}
+
+/* Fenêtres */
+.layer{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.72);
+  padding:calc(16px + var(--st)) calc(16px + var(--sr)) calc(16px + var(--sb)) calc(16px + var(--sl))}
+.card{width:100%;max-width:520px;max-height:100%;overflow:auto;background:#17181b;border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.card h2{margin:0 0 10px;font:800 20px var(--ui)}
+.card p{margin:0 0 10px;font:500 16px/1.45 var(--ui);color:#e6e6e6;white-space:pre-line}
+.acts{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px}
+.btn{min-height:50px;padding:0 18px;border-radius:14px;border:1px solid var(--line);background:var(--glass);font:700 16px var(--ui);display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;color:#fff}
+.btn.pri{background:var(--red);border-color:var(--red)}
+.btn.wht{background:#fff;color:#000;border-color:#fff}
+#panel .card{display:flex;flex-direction:column;height:100%;max-height:640px}
+#ta{flex:1;min-height:120px;width:100%;resize:none;background:#0c0c0e;border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:14px;font:500 17px/1.45 var(--ui);color:#fff}
+#taInfo{min-height:20px;margin:8px 2px 0;font:600 14px var(--ui);color:#ffb4b0}
+#notice{z-index:25}
+#preview{z-index:30;background:#000;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:12px}
+#preview h2{margin:0;text-align:center;font:800 18px var(--ui)}
+#pv{flex:1;min-height:0;width:100%;background:#000;border-radius:14px;object-fit:contain}
+#preview .acts{justify-content:center;margin:0}
+#preview .btn{flex:1 1 140px;max-width:260px;min-height:56px;font-size:17px;white-space:nowrap}
+#preview #dl{flex-basis:100%;max-width:520px}
+@media (orientation:landscape){#preview #dl{flex-basis:220px;max-width:300px}}
+
+@media (orientation:landscape){
+  :root{--ph:52;--tt:var(--st);--tx:66px}
+  #bar{padding-top:6px;gap:6px}
+  .m{min-height:48px;flex-direction:row;gap:6px;font-size:13.5px;padding:0 8px}
+  #rec{width:60px;height:60px;border-width:3px}
+  #rec i{width:44px;height:44px}
+  #rec.on i{width:24px;height:24px}
+  .main{max-width:760px;margin:0 auto;width:100%}
+}
+@media (orientation:landscape) and (max-height:380px){
+  .m span{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  #recInd i{animation:none}
+  #count b{animation:none}
+  #rec i{transition:none}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <video id="cam" playsinline muted autoplay></video>
+
+  <section id="prompter" aria-label="Texte à lire">
+    <div id="scroller"><pre id="text"></pre></div>
+    <div id="fade"></div>
+    <div id="readline"></div>
+    <button id="clear" aria-label="Vider le texte"><span><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></span></button>
+    <div id="clearHint" hidden>Touchez encore pour vider</div>
+  </section>
+
+  <div id="mid">
+    <div id="recInd" hidden><i></i>REC <span id="time">00:00</span></div>
+    <button id="camBtn" hidden><svg viewBox="0 0 24 24"><path d="M3 7h3l2-3h8l2 3h3v13H3z"/><circle cx="12" cy="13" r="4"/></svg>Allumer la caméra</button>
+  </div>
+
+  <nav id="bar" aria-label="Commandes">
+    <div class="sets">
+      <div class="grp" role="group" aria-label="Taille du texte">
+        <button class="b" id="fMinus" aria-label="Texte plus petit">A−</button>
+        <span class="val" id="fVal" aria-live="polite">38</span>
+        <button class="b" id="fPlus" aria-label="Texte plus grand">A+</button>
+        <button class="b" id="mirror" aria-pressed="false" aria-label="Texte en miroir"><svg viewBox="0 0 24 24"><path d="M12 3v18M8 7L3 12l5 5zM16 7l5 5-5 5z"/></svg>Miroir</button>
+      </div>
+      <div class="grp" role="group" aria-label="Vitesse">
+        <div class="seg">
+          <button class="b sp" data-v="30">Lente</button>
+          <button class="b sp" data-v="60">Moyenne</button>
+          <button class="b sp" data-v="100">Rapide</button>
+        </div>
+        <input type="range" id="speed" min="5" max="200" step="1" value="30" aria-label="Vitesse du défilement">
+        <span class="val" id="sVal">30</span>
+      </div>
+    </div>
+    <div class="main">
+      <button class="m" id="restart"><svg viewBox="0 0 24 24"><path d="M4 4v6h6"/><path d="M5.5 15a7.5 7.5 0 1 0 1.7-7.8L4 10"/></svg><span>Recommencer</span></button>
+      <button class="m" id="play"><svg viewBox="0 0 24 24" id="playIco"><path d="M7 4l13 8-13 8z"/></svg><span id="playLbl">Démarrer</span></button>
+      <button id="rec" aria-label="Enregistrer"><i></i></button>
+      <button class="m" id="flip"><svg viewBox="0 0 24 24"><path d="M3 7h3l2-3h8l2 3h3v13H3z"/><path d="M9 13a3 3 0 0 1 5.2-2M15 13a3 3 0 0 1-5.2 2M14 9v2h-2M10 17v-2h2"/></svg><span>Caméra</span></button>
+      <button class="m" id="textBtn"><svg viewBox="0 0 24 24"><path d="M5 5h14M12 5v14M8 19h8"/></svg><span>Texte</span></button>
+    </div>
+  </nav>
+</div>
+
+<div id="count" hidden><b id="countN">3</b></div>
+
+<div class="layer" id="panel" hidden role="dialog" aria-modal="true" aria-labelledby="panelT">
+  <div class="card">
+    <h2 id="panelT">Changer le texte</h2>
+    <textarea id="ta" placeholder="Collez votre script ici" spellcheck="false"></textarea>
+    <div id="taInfo"></div>
+    <div class="acts">
+      <button class="btn" id="paste">Coller</button>
+      <button class="btn" id="cancel">Annuler</button>
+      <button class="btn pri" id="load">Charger ce texte</button>
+    </div>
+  </div>
+</div>
+
+<div class="layer" id="notice" hidden role="alertdialog" aria-modal="true" aria-labelledby="nT" aria-describedby="nP">
+  <div class="card">
+    <h2 id="nT"></h2>
+    <p id="nP"></p>
+    <div class="acts">
+      <button class="btn" id="nClose">Fermer</button>
+      <button class="btn pri" id="nRetry" hidden>Réessayer</button>
+    </div>
+  </div>
+</div>
+
+<div class="layer" id="preview" hidden role="dialog" aria-modal="true" aria-label="Votre vidéo">
+  <h2>Votre vidéo</h2>
+  <video id="pv" controls playsinline preload="metadata"></video>
+  <div class="acts">
+    <a class="btn wht" id="dl" download><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></svg>Télécharger la vidéo</a>
+    <button class="btn" id="share" hidden><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/></svg>Partager</button>
+    <button class="btn pri" id="redo"><svg viewBox="0 0 24 24"><path d="M4 4v6h6"/><path d="M5.5 15a7.5 7.5 0 1 0 1.7-7.8L4 10"/></svg>Refaire</button>
+  </div>
+</div>
+
+<script>
+/*
+  Téléprompteur Radar — une seule page, sans bibliothèque.
+
+  ENVOYER UN TEXTE PAR LE LIEN : ajouter  #t=<texte en base64url UTF-8>  à l'adresse.
+  Fonction à utiliser dans l'application qui fabrique le lien :
+
+    function encoderPourLien(texte) {
+      const octets = new TextEncoder().encode(texte);          // UTF-8 (accents, « », ’, emoji…)
+      let bin = '';
+      for (let i = 0; i < octets.length; i += 0x8000)
+        bin += String.fromCharCode.apply(null, octets.subarray(i, i + 0x8000));
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    // lien = 'https://VOTRE-COMPTE.github.io/teleprompteur/#t=' + encoderPourLien(texte);
+
+  (En Apps Script : Utilities.base64EncodeWebSafe(texte, Utilities.Charset.UTF_8).replace(/=+$/, '') )
+*/
+'use strict';
+(function () {
+const $ = id => document.getElementById(id);
+const cam = $('cam'), scroller = $('scroller'), textEl = $('text'), playBtn = $('play'), recBtn = $('rec');
+const KT = 'tp_texte', KR = 'tp_reglages';
+const ACCUEIL = 'Bienvenue !\nTouchez « Texte » en bas pour coller votre script,\nou ouvrez le lien envoyé par l’application Radar.';
+const TYPES = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+
+let fontSize = 38, speed = 30, mirrorText = false;
+let pos = 0, playing = false, raf = 0, lastT = null, ratio = 0, lastMax = 0;
+let stream = null, facing = 'user', camWanted = false, camBusy = null;
+let recorder = null, chunks = [], recState = 'idle', recStart = 0, timerId = 0, countTimer = 0;
+let blobUrl = null, wakeLock = null, wakeQ = Promise.resolve(), clearArm = 0, countAt = 0, unsaved = false;
+const TP = window.TP = { lastTracks: [], blob: null, get recorder() { return recorder; }, get stream() { return stream; }, get recState() { return recState; }, get pos() { return pos; }, get playing() { return playing; }, get wakeLock() { return wakeLock; } };
+
+function sGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function sSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+
+/* ---------- Texte ---------- */
+function setText(t, save) {
+  stopScroll();
+  textEl.textContent = t;
+  if (save) sSet(KT, t ? t : null);
+  pos = 0; ratio = 0;
+  layout();
+  scroller.scrollTop = 0;
+  updPlay();
+}
+function decodeB64url(s) {
+  s = s.replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  const bin = atob(s), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(u);
+}
+function fromHash() {
+  const m = location.hash.match(/[#&]t=([^&]*)/);
+  if (!m) return null;
+  let raw = m[1];
+  try { raw = decodeURIComponent(raw); } catch (e) {}
+  try { return decodeB64url(raw); }
+  catch (e) { notice('Lien abîmé', 'Le texte contenu dans le lien n’a pas pu être lu. Demandez un nouveau lien à l’application.'); return null; }
+}
+function loadFromHash() {
+  const t = fromHash();
+  if (t == null) return false;
+  setText(t, true);
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  return true;
+}
+
+/* ---------- Mise en page de la zone de texte ---------- */
+function maxPos() { return Math.max(0, scroller.scrollHeight - scroller.clientHeight); }
+function layout() {
+  const h = scroller.clientHeight, lh = fontSize * 1.3;
+  const rl = Math.max(8, Math.round(Math.min(h * 0.2, lh * 1.2)));
+  document.documentElement.style.setProperty('--rl', rl + 'px');
+  textEl.style.paddingTop = rl + 'px';
+  textEl.style.paddingBottom = Math.max(0, Math.round(h - rl - lh)) + 'px';
+  lastMax = maxPos();
+}
+function keepRatio(fn) {
+  const m = maxPos(), r = m > 0 ? pos / m : 0;
+  fn();
+  layout();
+  pos = r * maxPos(); ratio = r;
+  scroller.scrollTop = pos;
+  updPlay();
+}
+
+/* ---------- Défilement ---------- */
+function tick(t) {
+  if (!playing) return;
+  if (lastT == null) lastT = t;
+  const dt = Math.min(0.1, Math.max(0, (t - lastT) / 1000));
+  lastT = t;
+  let m = maxPos();
+  if (m !== lastMax) { layout(); m = maxPos(); pos = ratio * m; scroller.scrollTop = pos; }
+  else if (Math.abs(scroller.scrollTop - pos) > 2) pos = scroller.scrollTop;
+  pos += speed * dt;
+  if (pos >= m) { pos = m; scroller.scrollTop = pos; stopScroll(); return; }
+  scroller.scrollTop = pos;
+  ratio = m > 0 ? pos / m : 0;
+  raf = requestAnimationFrame(tick);
+}
+function startScroll() {
+  if (playing) return;
+  const m = maxPos();
+  if (m <= 0) return;
+  if (Math.abs(scroller.scrollTop - pos) > 1) pos = scroller.scrollTop;
+  if (pos >= m - 1) { pos = 0; scroller.scrollTop = 0; }
+  playing = true; lastT = null;
+  raf = requestAnimationFrame(tick);
+  updPlay(); wake();
+}
+function stopScroll() {
+  if (!playing) return;
+  playing = false;
+  cancelAnimationFrame(raf);
+  updPlay(); wake();
+}
+function updPlay() {
+  const m = maxPos();
+  let lbl = 'Démarrer';
+  if (playing) lbl = 'Pause';
+  else if (pos > 1 && pos < m - 1) lbl = 'Reprendre';
+  $('playLbl').textContent = lbl;
+  playBtn.classList.toggle('on', playing);
+  $('playIco').innerHTML = playing ? '<path d="M8 5v14M16 5v14"/>' : '<path d="M7 4l13 8-13 8z"/>';
+}
+function userStop() { if (playing) stopScroll(); }
+scroller.addEventListener('pointerdown', userStop, { passive: true });
+scroller.addEventListener('touchstart', userStop, { passive: true });
+scroller.addEventListener('wheel', userStop, { passive: true });
+scroller.addEventListener('scroll', () => {
+  if (playing) return;
+  pos = scroller.scrollTop;
+  const m = maxPos();
+  if (m === lastMax) ratio = m > 0 ? pos / m : 0;
+  updPlay();
+}, { passive: true });
+new ResizeObserver(() => {
+  layout();
+  pos = ratio * maxPos();
+  scroller.scrollTop = pos;
+  updPlay();
+}).observe(scroller);
+
+playBtn.onclick = () => { playing ? stopScroll() : startScroll(); };
+$('restart').onclick = () => { const again = playing && recState === 'rec'; stopScroll(); pos = 0; ratio = 0; scroller.scrollTop = 0; updPlay(); if (again) startScroll(); };
+
+/* ---------- Réglages ---------- */
+function saveSets() { sSet(KR, JSON.stringify({ fontSize, speed, mirrorText })); }
+function setFont(n) {
+  n = Math.max(20, Math.min(96, n));
+  keepRatio(() => { fontSize = n; textEl.style.setProperty('--fs', n + 'px'); document.documentElement.style.setProperty('--fs', n + 'px'); });
+  $('fVal').textContent = n;
+  $('fMinus').disabled = n <= 20; $('fPlus').disabled = n >= 96;
+  saveSets();
+}
+function setSpeed(v) {
+  speed = Math.max(5, Math.min(200, +v || 30));
+  $('speed').value = speed; $('sVal').textContent = speed;
+  document.querySelectorAll('.sp').forEach(b => b.setAttribute('aria-pressed', +b.dataset.v === speed));
+  saveSets();
+}
+function setMirror(on) {
+  mirrorText = !!on;
+  textEl.classList.toggle('mirror', mirrorText);
+  $('mirror').setAttribute('aria-pressed', mirrorText);
+  saveSets();
+}
+$('fMinus').onclick = () => setFont(fontSize - 4);
+$('fPlus').onclick = () => setFont(fontSize + 4);
+$('speed').oninput = e => setSpeed(e.target.value);
+document.querySelectorAll('.sp').forEach(b => b.onclick = () => setSpeed(b.dataset.v));
+$('mirror').onclick = () => setMirror(!mirrorText);
+
+/* ---------- Vider le texte (deux appuis) ---------- */
+$('clear').onclick = () => {
+  if (clearArm) {
+    clearTimeout(clearArm); clearArm = 0;
+    $('clearHint').hidden = true; $('clear').classList.remove('armed');
+    setText('', true);
+    return;
+  }
+  $('clearHint').hidden = false; $('clear').classList.add('armed');
+  clearArm = setTimeout(() => { clearArm = 0; $('clearHint').hidden = true; $('clear').classList.remove('armed'); }, 3000);
+};
+
+/* ---------- Panneau Texte ---------- */
+const panel = $('panel'), ta = $('ta');
+$('textBtn').onclick = () => { ta.value = ''; $('taInfo').textContent = ''; panel.hidden = false; ta.focus(); };
+$('cancel').onclick = () => { panel.hidden = true; };
+$('load').onclick = () => {
+  if (!ta.value.trim()) { $('taInfo').textContent = 'La zone est vide : collez d’abord votre texte.'; return; }
+  setText(ta.value, true);
+  panel.hidden = true;
+};
+$('paste').onclick = async () => {
+  try {
+    const t = await navigator.clipboard.readText();
+    if (t) { ta.value = t; $('taInfo').textContent = ''; } else $('taInfo').textContent = 'Le presse-papiers est vide.';
+  } catch (e) { $('taInfo').textContent = 'Appuyez longtemps dans la zone puis choisissez « Coller ».'; }
+};
+
+/* ---------- Messages ---------- */
+let retryFn = null;
+function notice(title, text, retry) {
+  $('nT').textContent = title; $('nP').textContent = text;
+  retryFn = retry || null; $('nRetry').hidden = !retry;
+  $('notice').hidden = false;
+}
+$('nClose').onclick = () => { $('notice').hidden = true; };
+$('nRetry').onclick = () => { $('notice').hidden = true; if (retryFn) retryFn(); };
+const MSG = {
+  insecure: ['Adresse non sécurisée', 'La caméra ne marche que sur une adresse sécurisée, qui commence par https://\nOuvrez le lien https:// du téléprompteur.'],
+  nosupport: ['Caméra non disponible', 'Ce navigateur ne permet pas d’utiliser la caméra.\nOuvrez la page avec Google Chrome à jour.'],
+  norec: ['Enregistrement impossible', 'Ce navigateur ne sait pas enregistrer la vidéo.\nOuvrez la page avec Google Chrome à jour.'],
+  denied: ['Caméra ou micro bloqué', 'Pour autoriser :\n1. Touchez le cadenas à gauche de l’adresse dans Chrome.\n2. Touchez « Autorisations ».\n3. Mettez Caméra et Micro sur « Autoriser ».\n4. Rechargez la page.'],
+  notfound: ['Aucune caméra', 'Aucune caméra ou aucun micro n’a été trouvé sur cet appareil.'],
+  busy: ['Caméra occupée', 'La caméra est utilisée par une autre application.\nFermez cette application, puis touchez « Réessayer ».'],
+  other: ['Caméra non disponible', 'La caméra n’a pas pu démarrer. Touchez « Réessayer ».'],
+  empty: ['Vidéo vide', 'Rien n’a été enregistré. Touchez « Refaire » et essayez encore.']
+};
+
+/* ---------- Caméra ---------- */
+function gum(c) { return navigator.mediaDevices.getUserMedia(c); }
+function camError(e) {
+  const n = e && e.name;
+  if (n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError') notice(...MSG.denied);
+  else if (n === 'NotFoundError' || n === 'DevicesNotFoundError' || n === 'OverconstrainedError') notice(...MSG.notfound);
+  else if (n === 'NotReadableError' || n === 'TrackStartError' || n === 'AbortError') notice(...MSG.busy, () => startCamera());
+  else notice(...MSG.other, () => startCamera());
+}
+function startCamera() {
+  if (stream && stream.active) return Promise.resolve(true);
+  if (camBusy) return camBusy;
+  camBusy = (async () => {
+    if (!window.isSecureContext) { notice(...MSG.insecure); return false; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { notice(...MSG.nosupport); return false; }
+    const land = innerWidth > innerHeight;
+    const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    let s = null;
+    try {
+      s = await gum({ audio, video: { facingMode: { ideal: facing }, width: { ideal: land ? 1280 : 720 }, height: { ideal: land ? 720 : 1280 }, frameRate: { ideal: 30 } } });
+    } catch (e) {
+      if (e && e.name === 'OverconstrainedError') { try { s = await gum({ audio, video: { facingMode: facing } }); } catch (e2) { e = e2; } }
+      if (!s) { camError(e); $('camBtn').hidden = false; return false; }
+    }
+    if (document.visibilityState === 'hidden') { s.getTracks().forEach(t => t.stop()); camWanted = true; return false; }
+    stream = s; camWanted = true;
+    cam.srcObject = s; cam.muted = true;
+    cam.play().catch(() => {});
+    const vt = s.getVideoTracks()[0], st = vt && vt.getSettings ? vt.getSettings() : {};
+    cam.classList.toggle('mirror', (st.facingMode || facing) !== 'environment');
+    $('camBtn').hidden = true;
+    wake();
+    return true;
+  })();
+  camBusy.finally(() => { camBusy = null; });
+  return camBusy;
+}
+function stopCamera() {
+  if (stream) { TP.lastTracks = stream.getTracks(); stream.getTracks().forEach(t => t.stop()); }
+  stream = null; cam.srcObject = null;
+  wake();
+}
+$('camBtn').onclick = () => startCamera();
+$('flip').onclick = async () => {
+  if (recState !== 'idle' || camBusy) return;
+  facing = facing === 'user' ? 'environment' : 'user';
+  stopCamera();
+  await startCamera();
+};
+
+/* ---------- Écran allumé ---------- */
+function wake() {
+  wakeQ = wakeQ.then(async () => {
+    const need = (!!stream || playing) && document.visibilityState === 'visible';
+    try {
+      if (need && !wakeLock && 'wakeLock' in navigator) {
+        const w = await navigator.wakeLock.request('screen');
+        wakeLock = w; w.addEventListener('release', () => { if (wakeLock === w) wakeLock = null; });
+      } else if (!need && wakeLock) { const w = wakeLock; wakeLock = null; await w.release(); }
+    } catch (e) {}
+  });
+}
+
+/* ---------- Enregistrement ---------- */
+function setRecUI() {
+  recBtn.classList.toggle('on', recState === 'rec');
+  recBtn.classList.toggle('wait', recState === 'busy');
+  recBtn.setAttribute('aria-label', recState === 'rec' ? 'Arrêter l’enregistrement' : recState === 'count' ? 'Annuler' : 'Enregistrer');
+  $('flip').disabled = $('textBtn').disabled = $('clear').disabled = recState !== 'idle';
+  $('recInd').hidden = recState !== 'rec';
+}
+function pickType() {
+  for (const t of TYPES) { try { if (MediaRecorder.isTypeSupported(t)) return t; } catch (e) {} }
+  return '';
+}
+const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+function countdown(n) {
+  const c = $('count'), b = $('countN');
+  if (n === 0) { c.hidden = true; beginRec(); return; }
+  c.hidden = false;
+  const nb = b.cloneNode(); nb.textContent = n; b.replaceWith(nb);
+  countTimer = setTimeout(() => countdown(n - 1), 1000);
+}
+function cancelCount() { clearTimeout(countTimer); $('count').hidden = true; recState = 'idle'; setRecUI(); }
+recBtn.onclick = async () => {
+  if (recState === 'rec') { stopRec(); return; }
+  if (recState === 'count') { if (Date.now() - countAt > 600) cancelCount(); return; }
+  if (recState === 'busy') return;
+  if (typeof MediaRecorder === 'undefined') { notice(...MSG.norec); return; }
+  recState = 'busy'; setRecUI();
+  const ok = await startCamera();
+  if (!ok || document.visibilityState === 'hidden') { recState = 'idle'; setRecUI(); return; }
+  recState = 'count'; countAt = Date.now(); setRecUI();
+  stopScroll();
+  countdown(3);
+};
+function beginRec() {
+  if (!stream || !stream.active) { recState = 'idle'; setRecUI(); notice(...MSG.other, () => startCamera()); return; }
+  const type = pickType();
+  chunks = [];
+  try { recorder = new MediaRecorder(stream, type ? { mimeType: type, videoBitsPerSecond: 5000000, audioBitsPerSecond: 128000 } : {}); }
+  catch (e) { try { recorder = new MediaRecorder(stream); } catch (e2) { recState = 'idle'; setRecUI(); notice(...MSG.norec); return; } }
+  const r = recorder, fallback = type;
+  r.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  r.onstop = () => finishRec(r, fallback);
+  r.start(1000);
+  recState = 'rec'; recStart = Date.now();
+  $('time').textContent = '00:00';
+  timerId = setInterval(() => {
+    const s = Math.floor((Date.now() - recStart) / 1000);
+    $('time').textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }, 250);
+  setRecUI();
+  startScroll();
+  wake();
+}
+function stopRec() {
+  clearInterval(timerId);
+  stopScroll();
+  if (recorder && recorder.state !== 'inactive') { try { recorder.requestData(); } catch (e) {} recorder.stop(); }
+}
+function two(n) { return String(n).padStart(2, '0'); }
+function finishRec(r, fallback) {
+  const mime = r.mimeType || fallback || (chunks[0] && chunks[0].type) || 'video/webm';
+  const ext = /mp4/i.test(mime) ? 'mp4' : 'webm';
+  const blob = new Blob(chunks, { type: mime.split(';')[0] });
+  chunks = []; recState = 'idle'; setRecUI(); wake();
+  stopCamera();
+  if (!blob.size) { notice(...MSG.empty); return; }
+  TP.blob = blob; unsaved = true;
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
+  blobUrl = URL.createObjectURL(blob);
+  const d = new Date();
+  const name = 'RADAR_Industriel_Video_' + d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate()) + '_' + two(d.getHours()) + 'h' + two(d.getMinutes()) + '.' + ext;
+  const dl = $('dl'); dl.href = blobUrl; dl.download = name; dl.onclick = () => { unsaved = false; };
+  const pv = $('pv'); pv.src = blobUrl;
+  const file = (() => { try { return new File([blob], name, { type: blob.type }); } catch (e) { return null; } })();
+  const sh = $('share');
+  sh.hidden = !(file && navigator.canShare && navigator.canShare({ files: [file] }));
+  sh.onclick = () => navigator.share({ files: [file], title: name }).then(() => { unsaved = false; }, () => {});
+  $('preview').hidden = false;
+}
+/* Les vidéos webm n'ont pas de durée : on la calcule pour que la barre de lecture marche */
+$('pv').addEventListener('loadedmetadata', function () {
+  const v = this;
+  if (v.duration === Infinity) {
+    v.currentTime = 1e7;
+    v.addEventListener('timeupdate', function f() { v.removeEventListener('timeupdate', f); v.currentTime = 0; });
+  }
+});
+$('redo').onclick = () => {
+  const pv = $('pv'); pv.pause(); pv.removeAttribute('src'); pv.load();
+  $('preview').hidden = true;
+  if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+  TP.blob = null; unsaved = false;
+  pos = 0; ratio = 0; scroller.scrollTop = 0; updPlay();
+  startCamera();
+};
+
+/* ---------- Arrière-plan / sortie ---------- */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    if (recState === 'rec') stopRec();
+    else if (recState === 'count') cancelCount();
+    stopScroll();
+    if (recState === 'idle' && stream) { stopCamera(); camWanted = true; }
+  } else if (camWanted && !stream && $('preview').hidden && recState === 'idle') {
+    startCamera();
+  }
+});
+window.addEventListener('pagehide', () => {
+  if (recorder && recorder.state !== 'inactive') { try { recorder.stop(); } catch (e) {} }
+  stopCamera();
+});
+window.addEventListener('beforeunload', e => { if (recState === 'rec' || unsaved) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('hashchange', () => { loadFromHash(); });
+document.addEventListener('keydown', e => {
+  if (e.target !== document.body || !panel.hidden) return;
+  if (e.code === 'Space') { e.preventDefault(); playing ? stopScroll() : startScroll(); }
+});
+
+/* ---------- Démarrage ---------- */
+(function init() {
+  try { const r = JSON.parse(sGet(KR) || '{}'); if (r.fontSize) fontSize = r.fontSize; if (r.speed) speed = r.speed; mirrorText = !!r.mirrorText; } catch (e) {}
+  setSpeed(speed); setMirror(mirrorText); setFont(fontSize);
+  if (!loadFromHash()) {
+    const saved = sGet(KT);
+    setText(saved ? saved : ACCUEIL, false);
+  }
+  setRecUI();
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { $('camBtn').hidden = false; return; }
+  const q = n => navigator.permissions.query({ name: n }).then(p => p.state);
+  Promise.all([q('camera'), q('microphone')]).then(([c, m]) => {
+    if (c === 'granted' && m === 'granted') startCamera(); else $('camBtn').hidden = false;
+  }).catch(() => { $('camBtn').hidden = false; });
+})();
+})();
+</script>
+</body>
+</html>
